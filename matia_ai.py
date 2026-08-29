@@ -1,232 +1,106 @@
 import os
 import uuid
+
 from flask import Flask, request, jsonify, render_template_string
 from groq import Groq
 
+
 app = Flask(__name__)
 
-# =========================
+
+# ============================================================
 # CONFIG
-# =========================
+# ============================================================
 
-MODEL = os.getenv("MATIA_MODEL", "openai/gpt-oss-120b")
-GROQ_API_KEY = os.getenv("GROQ_API_KEY", "").strip()
+MODEL = os.getenv(
+    "MATIA_MODEL",
+    "openai/gpt-oss-120b"
+)
 
-MAX_HISTORY = 8
+GROQ_API_KEY = os.getenv(
+    "GROQ_API_KEY",
+    ""
+).strip()
+
+# Keep enough memory, but don't overload Groq.
+MAX_HISTORY = 4
+
+# Long answers are allowed, but the code below dynamically
+# reduces output when the context is large.
 MAX_OUTPUT_TOKENS = 6000
+
 MAX_MESSAGE_CHARS = 12000
 
-client = Groq(api_key=GROQ_API_KEY) if GROQ_API_KEY else None
+client = (
+    Groq(api_key=GROQ_API_KEY)
+    if GROQ_API_KEY
+    else None
+)
 
+
+# In-memory conversations.
 conversations = {}
 
 
-# =========================
-# 50+ EXPERTS
-# =========================
-
-EXPERTS = [
-    "General AI",
-    "Coding",
-    "Python",
-    "JavaScript",
-    "TypeScript",
-    "HTML",
-    "CSS",
-    "Java",
-    "C",
-    "C++",
-    "C#",
-    "PHP",
-    "Rust",
-    "Go",
-    "SQL",
-    "Lua",
-    "Luau",
-    "Roblox",
-    "Game Development",
-    "Web Development",
-    "App Development",
-    "AI",
-    "Machine Learning",
-    "API",
-    "Database",
-    "Git",
-    "GitHub",
-    "DevOps",
-    "Debugging",
-    "Testing",
-    "Math",
-    "Statistics",
-    "Science",
-    "Study",
-    "Teacher",
-    "Quiz",
-    "Flashcards",
-    "Writing",
-    "Editing",
-    "Translation",
-    "Research",
-    "Summarization",
-    "Data Analysis",
-    "Logic",
-    "Problem Solving",
-    "Planning",
-    "Brainstorming",
-    "Productivity",
-    "Security Education",
-    "Documentation",
-    "Project Architecture"
-]
-
-
-# =========================
-# EXPERT DETECTION
-# =========================
-
-def detect_experts(text):
-    text = text.lower()
-    found = []
-
-    groups = {
-        "Coding": [
-            "code", "coding", "programming", "script",
-            "function", "class", "developer"
-        ],
-        "Python": ["python", ".py"],
-        "JavaScript": ["javascript", "js"],
-        "HTML": ["html"],
-        "CSS": ["css"],
-        "Roblox": ["roblox", "roblox studio", "luau"],
-        "Math": [
-            "math", "calculate", "equation",
-            "algebra", "geometry", "percentage"
-        ],
-        "Study": [
-            "study", "school", "homework",
-            "lesson", "learn", "exam"
-        ],
-        "Debugging": [
-            "error", "bug", "debug",
-            "broken", "not working", "traceback"
-        ],
-        "AI": [
-            "ai", "artificial intelligence",
-            "llm", "machine learning"
-        ],
-        "API": [
-            "api", "endpoint", "webhook",
-            "json api"
-        ],
-        "GitHub": [
-            "github", "repository", "repo",
-            "commit", "branch"
-        ],
-        "DevOps": [
-            "render", "deploy", "deployment",
-            "server", "hosting"
-        ],
-        "Writing": [
-            "write", "writing", "essay",
-            "email", "story", "paragraph"
-        ],
-        "Translation": [
-            "translate", "translation"
-        ],
-        "Quiz": [
-            "quiz", "test me", "questions"
-        ],
-        "Planning": [
-            "plan", "roadmap", "steps"
-        ],
-        "Brainstorming": [
-            "idea", "ideas", "brainstorm"
-        ]
-    }
-
-    for expert, keywords in groups.items():
-        if any(word in text for word in keywords):
-            found.append(expert)
-
-    if not found:
-        found.append("General AI")
-
-    return found[:8]
-
-
-# =========================
-# LANGUAGE DETECTION
-# =========================
-
-def detect_language(text):
-    text = text.lower()
-
-    languages = {
-        "Python": ["python", ".py"],
-        "JavaScript": ["javascript", ".js"],
-        "TypeScript": ["typescript", ".ts"],
-        "HTML": ["html", ".html"],
-        "CSS": ["css", ".css"],
-        "Java": ["java", ".java"],
-        "C++": ["c++", "cpp", ".cpp"],
-        "C#": ["c#", "csharp", ".cs"],
-        "PHP": ["php", ".php"],
-        "Rust": ["rust", ".rs"],
-        "Go": ["golang", ".go"],
-        "SQL": ["sql", ".sql"],
-        "Lua": ["lua", ".lua"],
-        "Luau": ["luau"],
-        "Bash": ["bash", ".sh"],
-        "PowerShell": ["powershell", ".ps1"]
-    }
-
-    for language, keywords in languages.items():
-        if any(word in text for word in keywords):
-            return language
-
-    return "Auto"
-
-
-# =========================
+# ============================================================
 # SYSTEM PROMPT
-# =========================
+# ============================================================
 
 SYSTEM_PROMPT = """
 You are MATIA AI.
 
-You are a powerful multi-purpose AI assistant with 50+ expert areas.
+You are a powerful general-purpose AI assistant.
 
-Rules:
-- Be helpful, clear and accurate.
+You can help with:
+coding, Python, JavaScript, HTML, CSS, C, C++,
+C#, Java, PHP, Rust, Go, SQL, Lua, Luau, Roblox,
+web development, app development, APIs, databases,
+GitHub, DevOps, debugging, testing, mathematics,
+science, studying, writing, translation, research,
+data analysis, planning, brainstorming and productivity.
+
+GENERAL RULES:
+
+- Be helpful and accurate.
 - Answer in the user's language when appropriate.
 - Do not ask unnecessary questions.
-- If the request is clear, complete it directly.
-- Never pretend you performed an action that you did not perform.
+- If the request is clear, answer it directly.
+- Never claim you performed an action you did not perform.
 
 CODING:
+
 When the user asks for code, give actual code.
-When the user asks for full code, give a complete copy-paste-ready implementation.
+
+When the user asks for full code, provide a complete
+copy-paste-ready implementation.
+
 Use Markdown code blocks.
 
-HTML:
-If asked to make an HTML website or application,
-provide a complete HTML document with CSS and JavaScript when needed.
-
 DEBUGGING:
-If the user gives an error:
-1. Identify the likely cause.
+
+When the user gives an error:
+
+1. Identify the cause.
 2. Explain it briefly.
 3. Give the exact fix.
-4. Give corrected code when useful.
+4. Provide corrected code when useful.
+
+HTML:
+
+If the user asks for an HTML website or application,
+provide a complete HTML document when appropriate.
 
 MATH:
+
 Solve carefully and explain important steps.
 
 STUDY:
-Teach clearly and use examples.
+
+Teach clearly with examples.
 
 CONTEXT:
-Understand phrases such as:
+
+Understand references such as:
 "that code",
 "same one",
 "make it better",
@@ -234,100 +108,529 @@ Understand phrases such as:
 "add this".
 
 SECURITY:
+
 For cybersecurity topics, stay within legal,
 authorized, defensive and educational use.
 """
 
 
-# =========================
+# ============================================================
 # HISTORY
-# =========================
+# ============================================================
 
 def get_history(conversation_id):
-    return conversations.setdefault(conversation_id, [])
+
+    return conversations.setdefault(
+        conversation_id,
+        []
+    )
 
 
-def add_history(conversation_id, role, content):
-    history = get_history(conversation_id)
+def add_history(
+    conversation_id,
+    role,
+    content
+):
+
+    history = get_history(
+        conversation_id
+    )
 
     history.append({
         "role": role,
         "content": content
     })
 
+    # Keep only the newest messages.
     if len(history) > MAX_HISTORY:
-        conversations[conversation_id] = history[-MAX_HISTORY:]
+
+        conversations[
+            conversation_id
+        ] = history[-MAX_HISTORY:]
 
 
-# =========================
-# AI REQUEST
-# =========================
+# ============================================================
+# EXPERT DETECTION
+# ============================================================
 
-def ask_ai(conversation_id, user_message):
+def detect_experts(text):
 
-    if client is None:
-        raise RuntimeError(
-            "GROQ_API_KEY is missing. "
-            "Add GROQ_API_KEY to Render Environment Variables."
-        )
+    text = text.lower()
 
-    experts = detect_experts(user_message)
-    language = detect_language(user_message)
+    groups = {
+
+        "Coding": [
+            "code",
+            "coding",
+            "programming",
+            "script",
+            "function",
+            "class"
+        ],
+
+        "Python": [
+            "python",
+            ".py"
+        ],
+
+        "JavaScript": [
+            "javascript",
+            "js"
+        ],
+
+        "HTML": [
+            "html",
+            "website"
+        ],
+
+        "CSS": [
+            "css"
+        ],
+
+        "Roblox": [
+            "roblox",
+            "roblox studio",
+            "luau"
+        ],
+
+        "Math": [
+            "math",
+            "calculate",
+            "equation",
+            "algebra",
+            "geometry",
+            "percentage"
+        ],
+
+        "Study": [
+            "study",
+            "school",
+            "homework",
+            "lesson",
+            "exam"
+        ],
+
+        "Debugging": [
+            "error",
+            "bug",
+            "debug",
+            "broken",
+            "traceback"
+        ],
+
+        "AI": [
+            "ai",
+            "artificial intelligence",
+            "llm",
+            "machine learning"
+        ],
+
+        "API": [
+            "api",
+            "endpoint",
+            "webhook"
+        ],
+
+        "GitHub": [
+            "github",
+            "repository",
+            "repo",
+            "commit"
+        ],
+
+        "DevOps": [
+            "render",
+            "deploy",
+            "deployment",
+            "server",
+            "hosting"
+        ],
+
+        "Writing": [
+            "write",
+            "writing",
+            "essay",
+            "email",
+            "story"
+        ],
+
+        "Translation": [
+            "translate",
+            "translation"
+        ],
+
+        "Quiz": [
+            "quiz",
+            "test me"
+        ],
+
+        "Planning": [
+            "plan",
+            "roadmap",
+            "steps"
+        ],
+
+        "Brainstorming": [
+            "idea",
+            "ideas",
+            "brainstorm"
+        ]
+    }
+
+    found = []
+
+    for expert, keywords in groups.items():
+
+        if any(
+            keyword in text
+            for keyword in keywords
+        ):
+
+            found.append(expert)
+
+    if not found:
+
+        found.append("General AI")
+
+    return found[:6]
+
+
+# ============================================================
+# LANGUAGE DETECTION
+# ============================================================
+
+def detect_language(text):
+
+    text = text.lower()
+
+    languages = {
+
+        "Python": [
+            "python",
+            ".py"
+        ],
+
+        "JavaScript": [
+            "javascript",
+            ".js"
+        ],
+
+        "TypeScript": [
+            "typescript",
+            ".ts"
+        ],
+
+        "HTML": [
+            "html",
+            ".html"
+        ],
+
+        "CSS": [
+            "css",
+            ".css"
+        ],
+
+        "C++": [
+            "c++",
+            "cpp",
+            ".cpp"
+        ],
+
+        "C#": [
+            "c#",
+            "csharp",
+            ".cs"
+        ],
+
+        "Java": [
+            "java",
+            ".java"
+        ],
+
+        "PHP": [
+            "php",
+            ".php"
+        ],
+
+        "Rust": [
+            "rust",
+            ".rs"
+        ],
+
+        "Go": [
+            "golang"
+        ],
+
+        "SQL": [
+            "sql"
+        ],
+
+        "Lua": [
+            "lua"
+        ],
+
+        "Luau": [
+            "luau"
+        ]
+    }
+
+    for language, keywords in languages.items():
+
+        if any(
+            keyword in text
+            for keyword in keywords
+        ):
+
+            return language
+
+    return "Auto"
+
+
+# ============================================================
+# BUILD MESSAGES
+# ============================================================
+
+def build_messages(
+    conversation_id,
+    user_message,
+    history_limit
+):
+
+    experts = detect_experts(
+        user_message
+    )
+
+    language = detect_language(
+        user_message
+    )
 
     routing = f"""
-Current expert routing:
+Current experts:
 {", ".join(experts)}
 
-Detected programming language:
+Detected language:
 {language}
 """
 
     messages = [
+
         {
             "role": "system",
-            "content": SYSTEM_PROMPT + routing
+            "content":
+                SYSTEM_PROMPT +
+                routing
         }
+
     ]
 
-    for item in get_history(conversation_id):
+    history = get_history(
+        conversation_id
+    )
+
+    # Take only the newest requested amount.
+    selected_history = history[
+        -history_limit:
+    ]
+
+    for item in selected_history:
+
         messages.append({
-            "role": item["role"],
-            "content": item["content"]
+
+            "role":
+                item["role"],
+
+            "content":
+                item["content"]
+
         })
 
     messages.append({
-        "role": "user",
-        "content": user_message
+
+        "role":
+            "user",
+
+        "content":
+            user_message
+
     })
 
-    response = client.chat.completions.create(
+    return (
+        messages,
+        experts,
+        language
+    )
+
+
+# ============================================================
+# SAFE GROQ REQUEST
+# ============================================================
+
+def make_request(
+    messages,
+    output_tokens
+):
+
+    return client.chat.completions.create(
+
         model=MODEL,
+
         messages=messages,
-        max_tokens=MAX_OUTPUT_TOKENS,
+
+        max_tokens=output_tokens,
+
         temperature=0.35
     )
 
-    answer = response.choices[0].message.content
 
-    if not answer:
-        answer = "I couldn't generate an answer."
+def ask_ai(
+    conversation_id,
+    user_message
+):
 
-    return answer, experts, language
+    if not client:
+
+        raise RuntimeError(
+            "GROQ_API_KEY is missing. "
+            "Add it in Render Environment Variables."
+        )
+
+    # --------------------------------------------------------
+    # ATTEMPT 1
+    # --------------------------------------------------------
+
+    messages, experts, language = build_messages(
+        conversation_id,
+        user_message,
+        4
+    )
+
+    try:
+
+        response = make_request(
+            messages,
+            6000
+        )
+
+        answer = (
+            response
+            .choices[0]
+            .message
+            .content
+        )
+
+        return answer, experts, language
+
+    except Exception as first_error:
+
+        error_text = str(first_error).lower()
+
+        # ----------------------------------------------------
+        # ATTEMPT 2
+        # Less history + smaller output.
+        # ----------------------------------------------------
+
+        if (
+            "rate_limit" in error_text
+            or "tokens per minute" in error_text
+            or "request too large" in error_text
+            or "413" in error_text
+        ):
+
+            messages, experts, language = build_messages(
+                conversation_id,
+                user_message,
+                2
+            )
+
+            try:
+
+                response = make_request(
+                    messages,
+                    4000
+                )
+
+                answer = (
+                    response
+                    .choices[0]
+                    .message
+                    .content
+                )
+
+                return (
+                    answer,
+                    experts,
+                    language
+                )
+
+            except Exception as second_error:
+
+                # --------------------------------------------
+                # ATTEMPT 3
+                # Almost no conversation context.
+                # --------------------------------------------
+
+                messages, experts, language = build_messages(
+                    conversation_id,
+                    user_message,
+                    0
+                )
+
+                try:
+
+                    response = make_request(
+                        messages,
+                        2500
+                    )
+
+                    answer = (
+                        response
+                        .choices[0]
+                        .message
+                        .content
+                    )
+
+                    return (
+                        answer,
+                        experts,
+                        language
+                    )
+
+                except Exception:
+
+                    # Return a clean message instead of
+                    # exposing a giant server traceback.
+                    return (
+                        "⚠️ The request was too large for "
+                        "the current Groq token limit. "
+                        "Try sending a shorter message.",
+                        experts,
+                        language
+                    )
+
+        # Other errors should still be returned cleanly.
+        return (
+            "⚠️ Matia AI couldn't complete that request. "
+            "Please try again.",
+            experts,
+            language
+        )
 
 
-# =========================
+# ============================================================
 # FRONTEND
-# =========================
+# ============================================================
 
 HTML = """
 <!DOCTYPE html>
+
 <html lang="en">
 
 <head>
 
 <meta charset="UTF-8">
 
-<meta name="viewport"
+<meta
+name="viewport"
 content="width=device-width, initial-scale=1.0">
 
 <title>Matia AI</title>
@@ -339,234 +642,397 @@ content="width=device-width, initial-scale=1.0">
 }
 
 body {
+
     margin: 0;
+
     background: #08090d;
+
     color: white;
-    font-family: Arial, sans-serif;
+
+    font-family:
+        Arial,
+        Helvetica,
+        sans-serif;
 }
 
 .header {
+
     height: 64px;
+
     display: flex;
+
     align-items: center;
+
     justify-content: space-between;
+
     padding: 0 18px;
+
     background: #0d0f15;
-    border-bottom: 1px solid #252936;
+
+    border-bottom:
+        1px solid #252936;
 }
 
 .brand {
+
     display: flex;
+
     align-items: center;
+
     gap: 10px;
+
     font-weight: bold;
+
     font-size: 19px;
 }
 
 .logo {
+
     width: 38px;
+
     height: 38px;
-    border-radius: 12px;
+
     display: flex;
+
     align-items: center;
+
     justify-content: center;
-    background: linear-gradient(135deg, #705cff, #c64dff);
+
+    border-radius: 12px;
+
+    background:
+        linear-gradient(
+            135deg,
+            #705cff,
+            #c64dff
+        );
+
+    font-weight: bold;
 }
 
 .status {
+
     color: #8f96a5;
+
     font-size: 12px;
 }
 
 .main {
-    min-height: calc(100vh - 64px);
-    padding: 25px 14px 120px;
+
+    min-height:
+        calc(100vh - 64px);
+
+    padding:
+        25px 14px 120px;
+
     overflow-y: auto;
 }
 
 .content {
-    width: min(900px, 100%);
+
+    width:
+        min(900px, 100%);
+
     margin: auto;
 }
 
 .welcome {
+
     text-align: center;
-    padding: 55px 10px 25px;
+
+    padding:
+        55px 10px 25px;
 }
 
 .welcome h1 {
-    font-size: clamp(42px, 10vw, 70px);
+
     margin: 0;
+
+    font-size:
+        clamp(42px, 10vw, 70px);
 }
 
 .gradient {
-    background: linear-gradient(
-        90deg,
-        #8876ff,
-        #d35cff,
-        #62caff
-    );
-    -webkit-background-clip: text;
-    background-clip: text;
+
+    background:
+        linear-gradient(
+            90deg,
+            #8876ff,
+            #d35cff,
+            #62caff
+        );
+
+    -webkit-background-clip:
+        text;
+
+    background-clip:
+        text;
+
     color: transparent;
 }
 
 .welcome p {
+
     color: #9299a7;
+
     line-height: 1.6;
 }
 
 .cards {
+
     display: grid;
-    grid-template-columns: repeat(2, 1fr);
+
+    grid-template-columns:
+        repeat(2, 1fr);
+
     gap: 10px;
+
     max-width: 650px;
+
     margin: 30px auto;
 }
 
 .card {
-    border: 1px solid #292d38;
+
+    border:
+        1px solid #292d38;
+
     border-radius: 14px;
+
     padding: 16px;
+
     background: #11141b;
+
     color: #d4d8e0;
+
     cursor: pointer;
+
     text-align: left;
 }
 
 .card:hover {
+
     background: #181c25;
 }
 
 .message {
+
     display: flex;
+
     margin: 18px 0;
 }
 
 .user {
-    justify-content: flex-end;
+
+    justify-content:
+        flex-end;
 }
 
 .bubble {
+
     max-width: 94%;
-    padding: 13px 15px;
+
+    padding:
+        13px 15px;
+
     border-radius: 17px;
+
     line-height: 1.65;
-    overflow-wrap: anywhere;
+
+    overflow-wrap:
+        anywhere;
 }
 
 .user .bubble {
-    background: #202532;
+
+    background:
+        #202532;
 }
 
 .assistant .bubble {
-    background: transparent;
+
+    background:
+        transparent;
 }
 
 .codebox {
+
     margin: 15px 0;
-    border: 1px solid #2b303b;
+
+    border:
+        1px solid #2b303b;
+
     border-radius: 14px;
+
     overflow: hidden;
-    background: #0b0d12;
+
+    background:
+        #0b0d12;
 }
 
 .codebar {
+
     display: flex;
-    justify-content: space-between;
-    padding: 9px 11px;
-    background: #12151c;
+
+    justify-content:
+        space-between;
+
+    padding:
+        9px 11px;
+
+    background:
+        #12151c;
+
     color: #9299a7;
+
     font-size: 12px;
 }
 
 .copy {
+
     border: 0;
+
     border-radius: 8px;
-    padding: 7px 11px;
-    background: #272c38;
+
+    padding:
+        7px 11px;
+
+    background:
+        #272c38;
+
     color: white;
+
     cursor: pointer;
 }
 
 pre {
+
     margin: 0;
+
     padding: 15px;
+
     overflow-x: auto;
 }
 
 code {
-    font-family: Consolas, Monaco, monospace;
+
+    font-family:
+        Consolas,
+        Monaco,
+        monospace;
 }
 
 .composer-wrap {
+
     position: fixed;
+
     bottom: 0;
+
     left: 0;
+
     right: 0;
+
     padding: 12px;
-    background: linear-gradient(
-        to top,
-        #08090d 70%,
-        transparent
-    );
+
+    background:
+        linear-gradient(
+            to top,
+            #08090d 70%,
+            transparent
+        );
 }
 
 .composer {
-    width: min(900px, 100%);
+
+    width:
+        min(900px, 100%);
+
     margin: auto;
+
     display: flex;
+
     align-items: flex-end;
+
     gap: 8px;
+
     padding: 7px;
-    border: 1px solid #2a2e39;
+
+    border:
+        1px solid #2a2e39;
+
     border-radius: 18px;
-    background: #12151c;
+
+    background:
+        #12151c;
 }
 
 textarea {
+
     flex: 1;
+
     min-height: 45px;
+
     max-height: 180px;
+
     resize: none;
+
     border: 0;
+
     outline: 0;
+
     background: transparent;
+
     color: white;
+
     padding: 11px;
+
     font-size: 15px;
 }
 
 .send {
+
     width: 46px;
+
     height: 46px;
+
     border: 0;
+
     border-radius: 13px;
-    background: linear-gradient(
-        135deg,
-        #705cff,
-        #b94dff
-    );
+
+    background:
+        linear-gradient(
+            135deg,
+            #705cff,
+            #b94dff
+        );
+
     color: white;
+
     cursor: pointer;
+
     font-size: 18px;
 }
 
 .send:disabled {
+
     opacity: .45;
 }
 
 @media (max-width: 600px) {
 
     .cards {
-        grid-template-columns: 1fr;
+
+        grid-template-columns:
+            1fr;
     }
 
     .welcome {
+
         padding-top: 35px;
     }
 
     .bubble {
+
         max-width: 98%;
     }
 }
@@ -581,62 +1047,95 @@ textarea {
 
 <div class="brand">
 
-<div class="logo">M</div>
+<div class="logo">
+M
+</div>
 
 Matia AI
 
 </div>
 
-<div class="status" id="status">
+<div
+class="status"
+id="status">
+
 Ready
+
 </div>
 
 </header>
 
-<main class="main" id="main">
 
-<div class="content" id="content">
+<main
+class="main"
+id="main">
 
-<section class="welcome" id="welcome">
+<div
+class="content"
+id="content">
+
+<section
+class="welcome"
+id="welcome">
 
 <h1>
+
 <span class="gradient">
+
 Matia AI
+
 </span>
+
 </h1>
 
 <p>
-Coding • Math • Study • Debugging • Web • AI • Roblox • 50+ experts
+
+Coding • Math • Study •
+Debugging • Web • AI •
+Roblox • 50+ experts
+
 </p>
 
 <div class="cards">
 
-<button class="card"
+<button
+class="card"
 onclick="quickAsk(
 'Build me a complete HTML calculator with CSS and JavaScript. Give me the full copy-paste code.'
 )">
+
 💻 Build Code
+
 </button>
 
-<button class="card"
+<button
+class="card"
 onclick="quickAsk(
 'Solve a difficult math problem step by step and explain it clearly.'
 )">
+
 🧮 Math Expert
+
 </button>
 
-<button class="card"
+<button
+class="card"
 onclick="quickAsk(
 'Teach me Python from beginner to advanced with examples.'
 )">
+
 📚 Study Expert
+
 </button>
 
-<button class="card"
+<button
+class="card"
 onclick="quickAsk(
 'Help me debug my code and explain exactly what is wrong.'
 )">
+
 🔧 Debug Expert
+
 </button>
 
 </div>
@@ -647,58 +1146,79 @@ onclick="quickAsk(
 
 </main>
 
+
 <div class="composer-wrap">
 
-<form class="composer" id="form">
+<form
+class="composer"
+id="form">
 
 <textarea
 id="input"
 rows="1"
-placeholder="Ask Matia anything..."
-></textarea>
+placeholder="Ask Matia anything..."></textarea>
 
 <button
 class="send"
 id="send"
 type="submit">
+
 ➤
+
 </button>
 
 </form>
 
 </div>
 
+
 <script>
 
 const input =
-    document.getElementById("input");
+    document.getElementById(
+        "input"
+    );
 
 const send =
-    document.getElementById("send");
+    document.getElementById(
+        "send"
+    );
 
 const content =
-    document.getElementById("content");
+    document.getElementById(
+        "content"
+    );
 
 const main =
-    document.getElementById("main");
+    document.getElementById(
+        "main"
+    );
 
 const welcome =
-    document.getElementById("welcome");
+    document.getElementById(
+        "welcome"
+    );
 
 const status =
-    document.getElementById("status");
+    document.getElementById(
+        "status"
+    );
+
 
 let conversationId =
     localStorage.getItem(
         "matia_conversation_id"
     );
 
+
 if (!conversationId) {
 
     conversationId =
-        (crypto.randomUUID)
-        ? crypto.randomUUID()
-        : String(Date.now());
+        (
+            crypto.randomUUID
+            ? crypto.randomUUID()
+            : String(Date.now())
+        );
 
     localStorage.setItem(
         "matia_conversation_id",
@@ -710,20 +1230,43 @@ if (!conversationId) {
 function escapeHTML(value) {
 
     return String(value)
-        .replaceAll("&", "&amp;")
-        .replaceAll("<", "&lt;")
-        .replaceAll(">", "&gt;")
-        .replaceAll('"', "&quot;")
-        .replaceAll("'", "&#039;");
+
+        .replaceAll(
+            "&",
+            "&amp;"
+        )
+
+        .replaceAll(
+            "<",
+            "&lt;"
+        )
+
+        .replaceAll(
+            ">",
+            "&gt;"
+        )
+
+        .replaceAll(
+            '"',
+            "&quot;"
+        )
+
+        .replaceAll(
+            "'",
+            "&#039;"
+        );
 }
 
 
 function renderAnswer(text) {
 
     const parts =
-        text.split(/```([\\s\\S]*?)```/g);
+        text.split(
+            /```([\\s\\S]*?)```/g
+        );
 
     let html = "";
+
 
     for (
         let i = 0;
@@ -742,6 +1285,7 @@ function renderAnswer(text) {
             const lines =
                 code.split("\\n");
 
+
             if (
                 lines.length > 1 &&
                 /^[a-zA-Z0-9+#._-]+$/.test(
@@ -759,20 +1303,32 @@ function renderAnswer(text) {
                         .trim();
             }
 
+
             html +=
                 '<div class="codebox">' +
+
                 '<div class="codebar">' +
+
                 '<span>' +
                 escapeHTML(language) +
                 '</span>' +
-                '<button class="copy" ' +
+
+                '<button ' +
+                'class="copy" ' +
                 'onclick="copyCode(this)">' +
+
                 '📋 Copy' +
+
                 '</button>' +
+
                 '</div>' +
+
                 '<pre><code>' +
+
                 escapeHTML(code) +
+
                 '</code></pre>' +
+
                 '</div>';
 
         } else {
@@ -780,11 +1336,13 @@ function renderAnswer(text) {
             let normal =
                 escapeHTML(parts[i]);
 
+
             normal =
                 normal.replace(
                     /\\*\\*(.*?)\\*\\*/g,
                     "<strong>$1</strong>"
                 );
+
 
             normal =
                 normal.replace(
@@ -792,36 +1350,53 @@ function renderAnswer(text) {
                     "<code>$1</code>"
                 );
 
+
             normal =
                 normal.replace(
                     /\\n/g,
                     "<br>"
                 );
 
+
             html += normal;
         }
     }
+
 
     return html;
 }
 
 
-function addMessage(role, text) {
+function addMessage(
+    role,
+    text
+) {
 
-    welcome.style.display = "none";
+    welcome.style.display =
+        "none";
+
 
     const message =
-        document.createElement("div");
+        document.createElement(
+            "div"
+        );
 
     message.className =
         "message " + role;
 
+
     const bubble =
-        document.createElement("div");
+        document.createElement(
+            "div"
+        );
 
-    bubble.className = "bubble";
+    bubble.className =
+        "bubble";
 
-    if (role === "assistant") {
+
+    if (
+        role === "assistant"
+    ) {
 
         bubble.innerHTML =
             renderAnswer(text);
@@ -832,9 +1407,15 @@ function addMessage(role, text) {
             escapeHTML(text);
     }
 
-    message.appendChild(bubble);
 
-    content.appendChild(message);
+    message.appendChild(
+        bubble
+    );
+
+    content.appendChild(
+        message
+    );
+
 
     main.scrollTop =
         main.scrollHeight;
@@ -844,19 +1425,27 @@ function addMessage(role, text) {
 function showThinking() {
 
     const message =
-        document.createElement("div");
+        document.createElement(
+            "div"
+        );
 
-    message.id = "thinking";
+    message.id =
+        "thinking";
 
     message.className =
         "message assistant";
+
 
     message.innerHTML =
         '<div class="bubble">' +
         '🧠 Matia is thinking...' +
         '</div>';
 
-    content.appendChild(message);
+
+    content.appendChild(
+        message
+    );
+
 
     main.scrollTop =
         main.scrollHeight;
@@ -870,7 +1459,9 @@ function hideThinking() {
             "thinking"
         );
 
+
     if (thinking) {
+
         thinking.remove();
     }
 }
@@ -878,55 +1469,87 @@ function hideThinking() {
 
 async function sendMessage(text) {
 
-    text = text.trim();
+    text =
+        text.trim();
 
-    if (!text || send.disabled) {
+
+    if (
+        !text ||
+        send.disabled
+    ) {
+
         return;
     }
 
-    addMessage("user", text);
 
-    input.value = "";
+    addMessage(
+        "user",
+        text
+    );
 
-    send.disabled = true;
+
+    input.value =
+        "";
+
+
+    send.disabled =
+        true;
+
 
     status.textContent =
         "Thinking...";
 
+
     showThinking();
+
 
     try {
 
         const response =
-            await fetch("/chat", {
+            await fetch(
+                "/chat",
+                {
 
-                method: "POST",
+                    method:
+                        "POST",
 
-                headers: {
-                    "Content-Type":
-                        "application/json"
-                },
+                    headers: {
 
-                body: JSON.stringify({
-                    message: text,
-                    conversation_id:
-                        conversationId
-                })
-            });
+                        "Content-Type":
+                            "application/json"
+
+                    },
+
+                    body:
+                        JSON.stringify({
+
+                            message:
+                                text,
+
+                            conversation_id:
+                                conversationId
+
+                        })
+
+                }
+            );
+
 
         const data =
             await response.json();
 
+
         hideThinking();
+
 
         if (!response.ok) {
 
             addMessage(
                 "assistant",
-                "❌ " +
+                "⚠️ " +
                 (
                     data.error ||
-                    "Server error."
+                    "Something went wrong."
                 )
             );
 
@@ -939,18 +1562,23 @@ async function sendMessage(text) {
             );
         }
 
+
     } catch (error) {
 
         hideThinking();
 
+
         addMessage(
             "assistant",
-            "❌ Connection error. Check Render logs."
+            "⚠️ Connection problem. "
+            + "Please try again."
         );
+
 
     } finally {
 
-        send.disabled = false;
+        send.disabled =
+            false;
 
         status.textContent =
             "Ready";
@@ -961,6 +1589,7 @@ async function sendMessage(text) {
 
 
 function quickAsk(text) {
+
     sendMessage(text);
 }
 
@@ -968,26 +1597,38 @@ function quickAsk(text) {
 async function copyCode(button) {
 
     const box =
-        button.closest(".codebox");
+        button.closest(
+            ".codebox"
+        );
+
 
     const code =
-        box.querySelector("code")
-            .innerText;
+        box.querySelector(
+            "code"
+        ).innerText;
+
 
     try {
 
-        await navigator.clipboard
+        await navigator
+            .clipboard
             .writeText(code);
+
 
         button.innerText =
             "✓ Copied";
 
-        setTimeout(() => {
 
-            button.innerText =
-                "📋 Copy";
+        setTimeout(
+            () => {
 
-        }, 1200);
+                button.innerText =
+                    "📋 Copy";
+
+            },
+            1200
+        );
+
 
     } catch (error) {
 
@@ -1054,28 +1695,48 @@ input.addEventListener(
 """
 
 
-# =========================
+# ============================================================
 # ROUTES
-# =========================
+# ============================================================
 
 @app.route("/")
 def home():
-    return render_template_string(HTML)
+
+    return render_template_string(
+        HTML
+    )
 
 
 @app.route("/health")
 def health():
 
     return jsonify({
-        "status": "online",
-        "name": "Matia AI",
-        "model": MODEL,
-        "api_configured": bool(GROQ_API_KEY),
-        "expert_count": len(EXPERTS)
+
+        "status":
+            "online",
+
+        "name":
+            "Matia AI",
+
+        "model":
+            MODEL,
+
+        "api_configured":
+            bool(GROQ_API_KEY),
+
+        "max_history":
+            MAX_HISTORY,
+
+        "max_output_tokens":
+            MAX_OUTPUT_TOKENS
+
     })
 
 
-@app.route("/chat", methods=["POST"])
+@app.route(
+    "/chat",
+    methods=["POST"]
+)
 def chat():
 
     try:
@@ -1084,9 +1745,14 @@ def chat():
             silent=True
         ) or {}
 
+
         message = str(
-            data.get("message", "")
+            data.get(
+                "message",
+                ""
+            )
         ).strip()
+
 
         conversation_id = str(
             data.get(
@@ -1095,44 +1761,74 @@ def chat():
             )
         )
 
+
         if not message:
 
             return jsonify({
+
                 "error":
                     "Write a message first."
+
             }), 400
+
 
         if len(message) > MAX_MESSAGE_CHARS:
 
             return jsonify({
+
                 "error":
                     "Message is too long."
+
             }), 400
 
+
         answer, experts, language = ask_ai(
+
             conversation_id,
+
             message
+
         )
 
+
         add_history(
+
             conversation_id,
+
             "user",
+
             message
+
         )
 
+
         add_history(
+
             conversation_id,
+
             "assistant",
+
             answer
+
         )
+
 
         return jsonify({
-            "answer": answer,
-            "experts": experts,
-            "language": language,
+
+            "answer":
+                answer,
+
+            "experts":
+                experts,
+
+            "language":
+                language,
+
             "conversation_id":
                 conversation_id
+
         })
+
 
     except Exception as error:
 
@@ -1141,14 +1837,20 @@ def chat():
             repr(error)
         )
 
+
         return jsonify({
-            "error": str(error)
+
+            "error":
+                "Matia AI encountered "
+                "a temporary problem. "
+                "Please try again."
+
         }), 500
 
 
-# =========================
+# ============================================================
 # START
-# =========================
+# ============================================================
 
 if __name__ == "__main__":
 
@@ -1159,9 +1861,44 @@ if __name__ == "__main__":
         )
     )
 
-    app.run(
-        host="0.0.0.0",
-        port=port,
-        debug=False
+
+    print("=" * 60)
+
+    print(
+        "MATIA AI STARTING"
     )
-    
+
+    print(
+        "MODEL:",
+        MODEL
+    )
+
+    print(
+        "GROQ:",
+        "CONNECTED"
+        if client
+        else "MISSING API KEY"
+    )
+
+    print(
+        "MAX HISTORY:",
+        MAX_HISTORY
+    )
+
+    print(
+        "MAX OUTPUT:",
+        MAX_OUTPUT_TOKENS
+    )
+
+    print("=" * 60)
+
+
+    app.run(
+
+        host="0.0.0.0",
+
+        port=port,
+
+        debug=False
+
+    )
