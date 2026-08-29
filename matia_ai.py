@@ -1,458 +1,344 @@
 import os
+import uuid
 from flask import Flask, request, jsonify, render_template_string
 from groq import Groq
 
-# ============================================================
-# MATIA AI
-# One-file Flask + Groq AI
-# ============================================================
-
 app = Flask(__name__)
 
-# ------------------------------------------------------------
-# GROQ
-# ------------------------------------------------------------
+GROQ_API_KEY = os.getenv("GROQ_API_KEY", "").strip()
+MODEL = os.getenv("MATIA_MODEL", "openai/gpt-oss-120b")
 
-API_KEY = os.environ.get("GROQ_API_KEY", "").strip()
-
-MODEL = os.environ.get(
-    "MATIA_MODEL",
-    "openai/gpt-oss-120b"
-)
-
-client = Groq(api_key=API_KEY) if API_KEY else None
-
-# ------------------------------------------------------------
-# CONVERSATION MEMORY
-# ------------------------------------------------------------
-
-conversations = {}
-
-MAX_HISTORY = 12
+MAX_HISTORY = 16
 MAX_MESSAGE_LENGTH = 12000
 MAX_OUTPUT_TOKENS = 5000
 
-# ------------------------------------------------------------
-# 50 EXPERTS
-# ------------------------------------------------------------
+client = Groq(api_key=GROQ_API_KEY) if GROQ_API_KEY else None
+conversations = {}
 
 EXPERTS = [
-    "Coding & Programming",
-    "Reasoning & Problem Solving",
-    "Mathematics",
-    "Studying & Tutoring",
-    "Science",
-    "Web Research",
-    "Documents",
-    "Files & Projects",
-    "Writing",
-    "Editing & Proofreading",
-    "Translation",
-    "Language Learning",
-    "Creative Ideas",
-    "Image Understanding",
-    "Video Concepts",
-    "Music & Lyrics",
-    "Game Development",
-    "Roblox & Luau",
-    "Web Development",
-    "App Development",
-    "AI Development",
-    "APIs & Integrations",
-    "Databases",
-    "Cloud & Deployment",
-    "Git & GitHub",
-    "Linux",
-    "Windows",
-    "DevOps",
-    "Docker",
-    "Debugging",
-    "Testing & Quality",
-    "Defensive Cybersecurity",
-    "Privacy & Security",
-    "Data Analysis",
-    "Statistics",
-    "Logic",
-    "Puzzles",
-    "Organization",
-    "Planning",
-    "Goal Planning",
-    "Brainstorming",
-    "Checklists",
-    "Summarization",
-    "Information Extraction",
-    "Reports",
-    "Teacher Mode",
-    "Quiz Generator",
-    "Flashcards",
-    "Exam Preparation",
-    "AI Agent & Automation"
+    "General AI", "Coding Expert", "Python Expert",
+    "JavaScript Expert", "TypeScript Expert", "HTML Expert",
+    "CSS Expert", "Java Expert", "C Expert", "C++ Expert",
+    "C# Expert", "PHP Expert", "Rust Expert", "Go Expert",
+    "SQL Expert", "Lua Expert", "Luau Expert", "Roblox Expert",
+    "Game Development", "Web Development", "App Development",
+    "AI Expert", "Machine Learning", "API Expert",
+    "Database Expert", "Git Expert", "GitHub Expert",
+    "DevOps Expert", "Debugging Expert", "Testing Expert",
+    "Math Expert", "Statistics Expert", "Science Expert",
+    "Study Expert", "Teacher Mode", "Quiz Expert",
+    "Flashcard Expert", "Writing Expert", "Editing Expert",
+    "Translation Expert", "Research Assistant",
+    "Summarization", "Data Analysis", "Logic Expert",
+    "Problem Solving", "Planning Expert", "Brainstorming",
+    "Productivity", "Security Education", "Documentation Expert",
+    "Project Architecture"
 ]
 
-# ------------------------------------------------------------
-# EXPERT KEYWORDS
-# ------------------------------------------------------------
-
-KEYWORDS = {
-    "Coding & Programming": [
-        "code", "coding", "script", "program",
-        "python", "javascript", "typescript",
-        "html", "css", "java", "c++", "c#",
-        "php", "ruby", "rust", "golang",
-        "lua", "luau", "sql", "bash"
+ROUTES = {
+    "Coding Expert": [
+        "code", "coding", "program", "programming",
+        "script", "function", "class", "algorithm"
     ],
-
-    "Mathematics": [
-        "math", "mathematics", "calculate",
-        "equation", "algebra", "geometry",
-        "percentage", "fraction", "probability",
-        "calculus", "integral", "derivative"
+    "Math Expert": [
+        "math", "mathematics", "calculate", "equation",
+        "algebra", "geometry", "fraction", "percentage",
+        "probability", "calculus"
     ],
-
-    "Studying & Tutoring": [
-        "study", "learn", "school", "homework",
-        "lesson", "teach", "explain", "exam",
-        "revision", "test"
+    "Study Expert": [
+        "study", "school", "homework", "lesson",
+        "learn", "teach", "exam", "test"
     ],
-
-    "Writing": [
-        "write", "rewrite", "essay", "email",
-        "message", "story", "caption",
-        "paragraph", "post"
+    "Debugging Expert": [
+        "error", "bug", "debug", "broken", "fix",
+        "traceback", "exception", "syntaxerror"
     ],
-
-    "Translation": [
-        "translate", "translation", "english",
-        "albanian", "italian", "spanish",
-        "german", "french"
-    ],
-
-    "Roblox & Luau": [
+    "Roblox Expert": [
         "roblox", "roblox studio", "luau",
-        "localscript", "serverscript",
-        "leaderstats", "remoteevent"
+        "localscript", "serverscript", "remoteevent"
     ],
-
-    "Game Development": [
-        "game", "unity", "godot", "unreal",
-        "npc", "inventory", "quest",
-        "level", "shop system"
+    "Web Development": [
+        "website", "web app", "frontend", "backend",
+        "html", "css", "javascript"
     ],
-
-    "Debugging": [
-        "error", "bug", "debug", "broken",
-        "fix", "not working", "traceback",
-        "syntaxerror", "exception"
+    "AI Expert": [
+        "ai", "artificial intelligence", "llm",
+        "model", "prompt", "machine learning"
     ],
-
-    "AI Development": [
-        "ai", "artificial intelligence",
-        "machine learning", "llm", "model",
-        "prompt", "agent", "groq", "openai"
+    "API Expert": [
+        "api", "endpoint", "rest api", "webhook",
+        "token", "json api"
     ],
-
+    "GitHub Expert": [
+        "github", "git", "repository", "repo",
+        "commit", "branch"
+    ],
+    "DevOps Expert": [
+        "render", "deploy", "deployment", "server",
+        "hosting", "docker", "environment variable"
+    ],
+    "Writing Expert": [
+        "write", "writing", "essay", "email",
+        "message", "story", "caption"
+    ],
+    "Translation Expert": [
+        "translate", "translation"
+    ],
     "Data Analysis": [
-        "data", "dataset", "csv", "analysis",
-        "chart", "graph", "average",
-        "median", "statistics"
+        "data", "dataset", "csv", "dataframe",
+        "analysis", "analyze", "chart"
     ],
-
-    "Planning": [
-        "plan", "planning", "roadmap",
-        "schedule", "organize", "steps"
+    "Quiz Expert": [
+        "quiz", "quiz me", "test me", "questions"
     ],
-
-    "Quiz Generator": [
-        "quiz", "questions", "test me"
+    "Planning Expert": [
+        "plan", "roadmap", "steps", "schedule",
+        "organize"
     ],
-
-    "Flashcards": [
-        "flashcards", "flash card", "cards"
+    "Brainstorming": [
+        "ideas", "idea", "brainstorm", "suggest"
     ]
 }
 
-# ------------------------------------------------------------
-# CODE DETECTION
-# ------------------------------------------------------------
 
-LANGUAGES = {
-    "Python": ["python", ".py"],
-    "JavaScript": ["javascript", ".js"],
-    "TypeScript": ["typescript", ".ts"],
-    "HTML": ["html", ".html"],
-    "CSS": ["css", ".css"],
-    "Lua/Luau": ["lua", "luau", ".lua"],
-    "Java": ["java", ".java"],
-    "C++": ["c++", ".cpp"],
-    "C#": ["c#", "csharp", ".cs"],
-    "PHP": ["php", ".php"],
-    "Ruby": ["ruby", ".rb"],
-    "Rust": ["rust", ".rs"],
-    "Go": ["golang", ".go"],
-    "SQL": ["sql", ".sql"],
-    "Bash": ["bash", ".sh"],
-    "PowerShell": ["powershell", ".ps1"]
-}
+def detect_experts(text):
+    lowered = text.lower()
+    detected = []
+
+    for expert, keywords in ROUTES.items():
+        if any(keyword in lowered for keyword in keywords):
+            detected.append(expert)
+
+    return detected[:8] or ["General AI"]
 
 
 def detect_language(text):
-    text = text.lower()
+    lowered = text.lower()
 
-    for language, words in LANGUAGES.items():
-        for word in words:
-            if word in text:
-                return language
+    languages = {
+        "Python": ["python", ".py"],
+        "JavaScript": ["javascript", ".js"],
+        "TypeScript": ["typescript", ".ts"],
+        "HTML": ["html", ".html"],
+        "CSS": ["css", ".css"],
+        "Java": ["java", ".java"],
+        "C++": ["c++", "cpp", ".cpp"],
+        "C#": ["c#", "csharp", ".cs"],
+        "PHP": ["php", ".php"],
+        "Rust": ["rust", ".rs"],
+        "Go": ["golang", ".go"],
+        "SQL": ["sql", ".sql"],
+        "Lua/Luau": ["lua", "luau", ".lua"],
+        "Bash": ["bash", ".sh"],
+        "PowerShell": ["powershell", ".ps1"]
+    }
+
+    for language, keywords in languages.items():
+        if any(keyword in lowered for keyword in keywords):
+            return language
 
     return "Auto"
 
 
 def is_code_request(text):
-    text = text.lower()
+    lowered = text.lower()
+
+    phrases = [
+        "write code",
+        "give me code",
+        "give me the code",
+        "make code",
+        "create code",
+        "generate code",
+        "full code",
+        "complete code",
+        "write a script",
+        "make a script",
+        "create a script",
+        "build a website",
+        "make a website",
+        "make an app",
+        "create an app"
+    ]
 
     if "```" in text:
         return True
 
-    actions = [
-        "make", "build", "create",
-        "write", "generate", "code",
-        "script", "program", "implement",
-        "fix", "debug", "website",
-        "calculator", "app"
-    ]
+    if any(phrase in lowered for phrase in phrases):
+        return True
 
-    has_language = any(
-        word in text
-        for values in LANGUAGES.values()
-        for word in values
+    return any(
+        word in lowered
+        for word in [
+            "code", "script", "program",
+            "function", "html", "python",
+            "javascript", "luau", "sql"
+        ]
     )
 
-    has_action = any(
-        action in text
-        for action in actions
-    )
 
-    return has_language and has_action
+SYSTEM_PROMPT = """
+You are MATIA AI, a powerful multi-purpose AI assistant.
 
+You automatically select the best expert mode for every request.
 
-# ------------------------------------------------------------
-# AUTO EXPERT DETECTION
-# ------------------------------------------------------------
+GENERAL:
+- Understand the user's actual goal.
+- Answer clearly and accurately.
+- Use conversation context.
+- Do not ask unnecessary questions.
+- If the request is clear, complete it.
+- Answer in the user's language when appropriate.
+- Never pretend you executed something when you did not.
 
-def detect_experts(text):
-    text = text.lower()
-    result = []
+CODING EXPERT:
+When the user asks for code, ACTUALLY WRITE THE CODE.
 
-    if is_code_request(text):
-        result.append("Coding & Programming")
+Do NOT only explain how to make it.
 
-    for expert, keywords in KEYWORDS.items():
+If the user asks for an HTML calculator,
+give a complete HTML file containing HTML, CSS and JavaScript.
 
-        if any(keyword in text for keyword in keywords):
+If the user asks for Python,
+give actual Python code.
 
-            if expert not in result:
-                result.append(expert)
+If the user says "full code",
+give the complete implementation.
 
-    if not result:
-        result.append("Reasoning & Problem Solving")
+Code should be:
+- copy-paste ready
+- complete
+- useful
+- readable
+- syntactically valid
+- reasonably robust
 
-    return result[:7]
+Always put code in Markdown fenced blocks.
 
-
-# ------------------------------------------------------------
-# SYSTEM PROMPT
-# ------------------------------------------------------------
-
-SYSTEM_PROMPT = f"""
-You are MATIA AI, an advanced general-purpose AI assistant.
-
-You have 50 expert areas:
-
-{chr(10).join("- " + expert for expert in EXPERTS)}
-
-Your job is to automatically understand the user's request
-and select the appropriate expert or combination of experts.
-
-IMPORTANT GENERAL RULES:
-
-1. Understand the actual request.
-2. Use previous conversation context.
-3. Do not ask unnecessary questions.
-4. If the request is clear, do the task.
-5. Be accurate and practical.
-6. Answer in the user's language when possible.
-7. Do not invent facts.
-8. Do not pretend to have tools you don't have.
-9. Keep explanations useful rather than repetitive.
-
-CODING MODE:
-
-When the user asks for code:
-
-- ACTUALLY WRITE THE CODE.
-- Do not merely explain how to write it.
-- Make it copy-paste ready.
-- Make it complete and functional.
-- Use the requested programming language.
-- If they ask for HTML, produce actual HTML.
-- If they ask for Python, produce actual Python.
-- If they ask for Roblox, use Luau.
-- Include necessary CSS/JS when creating a complete website.
-- Do not intentionally make code tiny or fake.
-- Do not replace the requested code with questions.
-- If fixing code, provide the corrected code.
-- If the user asks for a full script, provide the full script.
-
-CODE FORMAT:
-
-Use Markdown code blocks:
-
-```python
-print("Hello")
-
-Do not put the code in normal conversational text.
-
-MATH MODE:
-
-Solve mathematical problems carefully.
-Show useful steps.
-Verify calculations.
-
-STUDY MODE:
-
-Teach clearly.
-Use examples.
-Increase difficulty gradually.
-Create quizzes or flashcards when requested.
-
-DEBUG MODE:
-
-When given an error:
-
+DEBUGGING:
+When the user gives an error:
 1. Identify the likely cause.
 2. Explain it briefly.
-3. Give the fix.
-4. Give complete corrected code when appropriate.
+3. Give the exact fix.
+4. Give corrected code when useful.
+
+MATH EXPERT:
+Solve calculations carefully and show useful steps.
+
+STUDY EXPERT:
+Teach concepts clearly with examples and practice.
 
 SMART CONTEXT:
-
-Use previous messages to understand references such as:
-
-"make it bigger"
-"fix that"
+Understand references like:
+"that code"
+"same one"
+"make it better"
 "continue"
-"make it Python"
-"add this"
-"change the UI"
+"add another button"
 
-Do not forget the current project requirements.
+You can help with:
+Python, JavaScript, TypeScript, HTML, CSS, Java,
+C, C++, C#, PHP, Rust, Go, SQL, Lua, Luau,
+Roblox, web development, apps, AI, APIs, databases,
+GitHub, DevOps, debugging, testing, mathematics,
+science, studying, writing, translation, research,
+data analysis, planning, productivity and more.
 
-SAFETY:
-
-For cybersecurity, stay within defensive,
-educational and authorized use.
-Do not assist with harmful wrongdoing.
+For cybersecurity, stay within legal, authorized,
+defensive and educational use.
 """
 
-------------------------------------------------------------
-
-HISTORY
-
-------------------------------------------------------------
 
 def get_history(conversation_id):
+    if conversation_id not in conversations:
+        conversations[conversation_id] = []
 
-if conversation_id not in conversations:
-    conversations[conversation_id] = []
+    return conversations[conversation_id]
 
-return conversations[conversation_id]
 
 def add_history(conversation_id, role, content):
+    history = get_history(conversation_id)
 
-history = get_history(conversation_id)
-
-history.append({
-    "role": role,
-    "content": content
-})
-
-if len(history) > MAX_HISTORY:
-    del history[:-MAX_HISTORY]
-
-------------------------------------------------------------
-
-ASK GROQ
-
-------------------------------------------------------------
-
-def ask_ai(conversation_id, user_message):
-
-if client is None:
-    raise RuntimeError(
-        "GROQ_API_KEY is missing. "
-        "Add GROQ_API_KEY in Render Environment Variables."
-    )
-
-history = get_history(conversation_id)
-
-experts = detect_experts(user_message)
-language = detect_language(user_message)
-code_mode = is_code_request(user_message)
-
-routing = f"""
-
-CURRENT REQUEST:
-
-Detected experts:
-{", ".join(experts)}
-
-Detected language:
-{language}
-
-Code mode:
-{code_mode}
-"""
-
-messages = [
-    {
-        "role": "system",
-        "content": SYSTEM_PROMPT + routing
-    }
-]
-
-for item in history[-MAX_HISTORY:]:
-    messages.append({
-        "role": item["role"],
-        "content": item["content"]
+    history.append({
+        "role": role,
+        "content": content
     })
 
-messages.append({
-    "role": "user",
-    "content": user_message
-})
+    if len(history) > MAX_HISTORY:
+        conversations[conversation_id] = history[-MAX_HISTORY:]
 
-response = client.chat.completions.create(
-    model=MODEL,
-    messages=messages,
-    max_tokens=MAX_OUTPUT_TOKENS,
-    temperature=0.35
-)
 
-answer = response.choices[0].message.content
+def build_messages(conversation_id, user_message):
+    experts = detect_experts(user_message)
+    language = detect_language(user_message)
+    code_mode = is_code_request(user_message)
 
-return answer, experts, language, code_mode
+    routing = f"""
+ACTIVE EXPERTS:
+{", ".join(experts)}
 
-============================================================
+DETECTED LANGUAGE:
+{language}
 
-WEB UI
+CODE REQUEST:
+{"YES" if code_mode else "NO"}
+"""
 
-============================================================
+    messages = [{
+        "role": "system",
+        "content": SYSTEM_PROMPT + routing
+    }]
 
-HTML = """
+    messages.extend(get_history(conversation_id))
 
-<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><meta name="viewport"
+    messages.append({
+        "role": "user",
+        "content": user_message
+    })
+
+    return messages, experts, language, code_mode
+
+
+def ask_ai(conversation_id, user_message):
+    if client is None:
+        raise RuntimeError(
+            "GROQ_API_KEY is missing. "
+            "Add GROQ_API_KEY to Render Environment Variables."
+        )
+
+    messages, experts, language, code_mode = build_messages(
+        conversation_id,
+        user_message
+    )
+
+    response = client.chat.completions.create(
+        model=MODEL,
+        messages=messages,
+        max_tokens=MAX_OUTPUT_TOKENS,
+        temperature=0.35
+    )
+
+    answer = response.choices[0].message.content
+
+    if not answer:
+        answer = "I couldn't generate an answer."
+
+    return answer, experts, language, code_mode
+
+
+HTML = r"""
+<!DOCTYPE html>
+<html lang="en">
+<head>
+
+<meta charset="UTF-8">
+
+<meta name="viewport"
 content="width=device-width, initial-scale=1.0">
 
-<title>Matia AI</title><style>
+<title>Matia AI</title>
+
+<style>
 
 * {
     box-sizing: border-box;
@@ -461,30 +347,21 @@ content="width=device-width, initial-scale=1.0">
 body {
     margin: 0;
     background: #08090d;
-    color: #f5f5f7;
-    font-family:
-        Arial,
-        Helvetica,
-        sans-serif;
-}
-
-.app {
-    height: 100vh;
-    display: flex;
-    flex-direction: column;
+    color: #f5f7fb;
+    font-family: Arial, sans-serif;
 }
 
 .header {
     height: 64px;
+    padding: 0 18px;
     display: flex;
     align-items: center;
     justify-content: space-between;
-    padding: 0 18px;
-    border-bottom: 1px solid #242632;
-    background: #0c0d12;
+    background: #0d0f15;
+    border-bottom: 1px solid #252936;
 }
 
-.logo {
+.brand {
     display: flex;
     align-items: center;
     gap: 10px;
@@ -492,55 +369,49 @@ body {
     font-weight: bold;
 }
 
-.logoIcon {
-    width: 35px;
-    height: 35px;
-    border-radius: 11px;
+.logo {
+    width: 38px;
+    height: 38px;
+    border-radius: 12px;
     display: flex;
     align-items: center;
     justify-content: center;
-    background:
-        linear-gradient(
-            135deg,
-            #705cff,
-            #b64dff
-        );
+    background: linear-gradient(135deg, #705cff, #c64dff);
 }
 
 .status {
-    color: #888f9f;
+    color: #8b92a0;
     font-size: 12px;
 }
 
-.chat {
-    flex: 1;
+.main {
+    min-height: calc(100vh - 64px);
+    padding: 25px 14px 125px;
     overflow-y: auto;
-    padding: 25px 12px 120px;
 }
 
-.container {
-    max-width: 900px;
+.content {
+    width: min(900px, 100%);
     margin: auto;
 }
 
 .welcome {
     text-align: center;
-    padding: 80px 15px 25px;
+    padding: 55px 10px 25px;
 }
 
 .welcome h1 {
-    font-size: 48px;
-    margin-bottom: 10px;
+    font-size: clamp(40px, 9vw, 68px);
+    margin: 0;
 }
 
 .gradient {
-    background:
-        linear-gradient(
-            90deg,
-            #8d7bff,
-            #cf66ff,
-            #66caff
-        );
+    background: linear-gradient(
+        90deg,
+        #8876ff,
+        #d35cff,
+        #62caff
+    );
 
     -webkit-background-clip: text;
     background-clip: text;
@@ -548,35 +419,35 @@ body {
 }
 
 .welcome p {
-    color: #9299a8;
+    color: #9299a7;
     line-height: 1.6;
 }
 
-.chips {
-    display: flex;
-    flex-wrap: wrap;
-    justify-content: center;
-    gap: 8px;
-    margin-top: 25px;
+.cards {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 10px;
+    max-width: 650px;
+    margin: 30px auto;
 }
 
-.chip {
-    background: #12151d;
-    border: 1px solid #292d39;
-    color: #bfc5d0;
-    padding: 9px 13px;
-    border-radius: 999px;
+.card {
+    text-align: left;
+    border: 1px solid #292d38;
+    border-radius: 14px;
+    padding: 15px;
+    background: #11141b;
+    color: #d4d8e0;
     cursor: pointer;
 }
 
-.chip:hover {
-    background: #1b1f29;
-    color: white;
+.card:hover {
+    background: #181c25;
 }
 
 .message {
     display: flex;
-    margin: 17px 0;
+    margin: 18px 0;
 }
 
 .user {
@@ -584,46 +455,45 @@ body {
 }
 
 .bubble {
-    max-width: 92%;
+    max-width: 94%;
     padding: 13px 15px;
     border-radius: 17px;
-    line-height: 1.6;
-    word-wrap: break-word;
+    line-height: 1.65;
+    overflow-wrap: anywhere;
 }
 
 .user .bubble {
-    background: #202430;
+    background: #202532;
 }
 
 .assistant .bubble {
     background: transparent;
 }
 
-.codeBox {
-    margin: 14px 0;
-    background: #0b0d12;
-    border: 1px solid #292d39;
-    border-radius: 13px;
+.codebox {
+    margin: 15px 0;
     overflow: hidden;
+    border: 1px solid #2b303b;
+    border-radius: 14px;
+    background: #0b0d12;
 }
 
-.codeHeader {
-    height: 38px;
+.codebar {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    padding: 0 10px;
-    background: #11141b;
-    color: #9299aa;
+    padding: 9px 11px;
+    background: #12151c;
+    color: #9299a7;
     font-size: 12px;
 }
 
-.copyBtn {
+.copy {
     border: 0;
-    background: #252a36;
+    border-radius: 8px;
+    padding: 7px 11px;
+    background: #272c38;
     color: white;
-    border-radius: 7px;
-    padding: 6px 10px;
     cursor: pointer;
 }
 
@@ -633,135 +503,169 @@ pre {
     overflow-x: auto;
 }
 
-textarea {
-    width: 100%;
-    min-height: 45px;
-    max-height: 160px;
-    resize: none;
-    border: 0;
-    outline: 0;
-    background: transparent;
-    color: white;
-    font-size: 15px;
-    padding: 10px;
+code {
+    font-family: Consolas, Monaco, monospace;
 }
 
-.inputArea {
+.composer-wrap {
     position: fixed;
     bottom: 0;
     left: 0;
     right: 0;
     padding: 12px;
-    background:
-        linear-gradient(
-            to top,
-            #08090d 70%,
-            transparent
-        );
+    background: linear-gradient(
+        to top,
+        #08090d 70%,
+        transparent
+    );
 }
 
 .composer {
-    max-width: 900px;
+    width: min(900px, 100%);
     margin: auto;
     display: flex;
-    align-items: flex-end;
     gap: 8px;
-    background: #12151c;
-    border: 1px solid #292d38;
-    border-radius: 18px;
+    align-items: flex-end;
     padding: 7px;
+    border: 1px solid #2a2e39;
+    border-radius: 18px;
+    background: #12151c;
+}
+
+textarea {
+    flex: 1;
+    min-height: 45px;
+    max-height: 180px;
+    resize: none;
+    border: 0;
+    outline: 0;
+    background: transparent;
+    color: white;
+    padding: 11px;
+    font-size: 15px;
 }
 
 .send {
-    width: 45px;
-    height: 45px;
+    width: 46px;
+    height: 46px;
     border: 0;
     border-radius: 13px;
+    background: linear-gradient(
+        135deg,
+        #705cff,
+        #b94dff
+    );
     color: white;
-    background:
-        linear-gradient(
-            135deg,
-            #705cff,
-            #ad50ff
-        );
     cursor: pointer;
     font-size: 18px;
 }
 
 .send:disabled {
-    opacity: .5;
+    opacity: .45;
 }
 
-@media(max-width:600px) {
+@media (max-width: 600px) {
 
-    .welcome {
-        padding-top: 50px;
+    .cards {
+        grid-template-columns: 1fr;
     }
 
-    .welcome h1 {
-        font-size: 37px;
+    .welcome {
+        padding-top: 35px;
     }
 
     .bubble {
-        max-width: 96%;
+        max-width: 98%;
     }
 }
 
-</style></head><body><div class="app"><header class="header"><div class="logo">
-    <div class="logoIcon">M</div>
+</style>
+
+</head>
+
+<body>
+
+<header class="header">
+
+<div class="brand">
+    <div class="logo">M</div>
     Matia AI
 </div>
 
 <div class="status" id="status">
-    AI Ready
+    Ready
 </div>
 
-</header><main class="chat" id="chat"><div class="container" id="messages"><section class="welcome" id="welcome"><h1>
+</header>
+
+<main class="main" id="main">
+
+<div class="content" id="content">
+
+<section class="welcome" id="welcome">
+
+<h1>
     <span class="gradient">
         Matia AI
     </span>
 </h1>
 
 <p>
-    Coding • Math • Study • Research •
-    Games • AI • 50 Expert Modes
+    Coding • Math • Study • Debugging •
+    Web • AI • Roblox • 50+ expert areas
 </p>
 
-<div class="chips">
+<div class="cards">
 
-    <button class="chip"
-            onclick="quick('Build me a complete HTML calculator')">
-        💻 Build Code
-    </button>
+<button class="card"
+onclick="quickAsk('Build me a complete HTML calculator with CSS and JavaScript. Give me the full copy-paste code.')">
+💻 Build Code
+</button>
 
-    <button class="chip"
-            onclick="quick('Explain this math problem step by step')">
-        🧮 Math
-    </button>
+<button class="card"
+onclick="quickAsk('Solve a difficult math problem step by step and explain it clearly.')">
+🧮 Math Expert
+</button>
 
-    <button class="chip"
-            onclick="quick('Teach me Python from beginner level')">
-        📚 Study
-    </button>
+<button class="card"
+onclick="quickAsk('Teach me Python from beginner to advanced with examples.')">
+📚 Study Expert
+</button>
 
-    <button class="chip"
-            onclick="quick('Help me debug my code')">
-        🔧 Debug
-    </button>
+<button class="card"
+onclick="quickAsk('Help me debug my code and explain exactly what is wrong.')">
+🔧 Debug Expert
+</button>
 
 </div>
 
-</section></div></main><div class="inputArea"><form class="composer" id="form"><textarea
-    id="input"
-    placeholder="Ask Matia anything..."
-    autocomplete="off"></textarea><button
+</section>
+
+</div>
+
+</main>
+
+<div class="composer-wrap">
+
+<form class="composer" id="form">
+
+<textarea
+id="input"
+rows="1"
+placeholder="Ask Matia anything..."></textarea>
+
+<button
 class="send"
 id="send"
 type="submit">
 ➤
 </button>
 
-</form></div></div><script>
+</form>
+
+</div>
+
+<script>
 
 const input =
     document.getElementById("input");
@@ -769,11 +673,11 @@ const input =
 const send =
     document.getElementById("send");
 
-const messages =
-    document.getElementById("messages");
+const content =
+    document.getElementById("content");
 
-const chat =
-    document.getElementById("chat");
+const main =
+    document.getElementById("main");
 
 const welcome =
     document.getElementById("welcome");
@@ -789,8 +693,9 @@ let conversationId =
 if (!conversationId) {
 
     conversationId =
-        Date.now().toString() +
-        Math.random().toString(36);
+        crypto.randomUUID
+        ? crypto.randomUUID()
+        : String(Date.now());
 
     localStorage.setItem(
         "matia_conversation_id",
@@ -798,453 +703,466 @@ if (!conversationId) {
     );
 }
 
-function escapeHTML(text) {
 
-    return text
+function escapeHTML(value) {
+
+    return String(value)
         .replaceAll("&", "&amp;")
         .replaceAll("<", "&lt;")
-        .replaceAll(">", "&gt;");
+        .replaceAll(">", "&gt;")
+        .replaceAll('"', "&quot;")
+        .replaceAll("'", "&#039;");
 }
+
 
 function renderAnswer(text) {
 
     const parts =
-        text.split(/```([\\s\\S]*?)```/g);
+        text.split(/```([\s\S]*?)```/g);
 
     let html = "";
 
-    for (let i = 0; i < parts.length; i++) {
+    for (
+        let i = 0;
+        i < parts.length;
+        i++
+    ) {
 
         if (i % 2 === 1) {
 
-            let code = parts[i];
+            let code =
+                parts[i].trim();
 
-            let lines =
-                code.split("\\n");
+            let language =
+                "code";
 
-            let language = "code";
+            const lines =
+                code.split("\n");
 
             if (
-                lines.length > 0 &&
-                /^[a-zA-Z0-9_+#-]+$/.test(
+                lines.length > 1 &&
+                /^[a-zA-Z0-9+#._-]+$/.test(
                     lines[0].trim()
                 )
             ) {
 
                 language =
-                    lines.shift().trim();
+                    lines[0].trim();
+
+                code =
+                    lines
+                        .slice(1)
+                        .join("\n")
+                        .trim();
             }
 
-            code =
-                lines.join("\\n").trim();
-
             html += `
-                <div class="codeBox">
+                <div class="codebox">
 
-                    <div class="codeHeader">
+                    <div class="codebar">
 
                         <span>
                             ${escapeHTML(language)}
                         </span>
 
                         <button
-                            class="copyBtn"
+                            class="copy"
                             onclick="copyCode(this)">
                             📋 Copy
                         </button>
 
                     </div>
 
-                    <pre><code>${escapeHTML(code)}</code></pre>            </div>
-        `;
+                    <pre><code>${escapeHTML(code)}</code></pre>
 
+                </div>
+            `;
+
+        } else {
+
+            let normal =
+                escapeHTML(parts[i]);
+
+            normal =
+                normal.replace(
+                    /\*\*(.*?)\*\*/g,
+                    "<strong>$1</strong>"
+                );
+
+            normal =
+                normal.replace(
+                    /`([^`]+)`/g,
+                    "<code>$1</code>"
+                );
+
+            normal =
+                normal.replace(
+                    /\n/g,
+                    "<br>"
+                );
+
+            html += normal;
+        }
+    }
+
+    return html;
+}
+
+
+function addMessage(role, text) {
+
+    welcome.style.display = "none";
+
+    const message =
+        document.createElement("div");
+
+    message.className =
+        "message " + role;
+
+    const bubble =
+        document.createElement("div");
+
+    bubble.className =
+        "bubble";
+
+    if (role === "assistant") {
+        bubble.innerHTML =
+            renderAnswer(text);
     } else {
+        bubble.innerHTML =
+            escapeHTML(text);
+    }
 
-        let normal =
-            escapeHTML(parts[i]);
+    message.appendChild(bubble);
+    content.appendChild(message);
 
-        normal =
-            normal.replace(
-                /\\*\\*(.*?)\\*\\*/g,
-                "<strong>$1</strong>"
-            );
+    main.scrollTop =
+        main.scrollHeight;
+}
 
-        normal =
-            normal.replace(
-                /`([^`]+)`/g,
-                "<code>$1</code>"
-            );
 
-        normal =
-            normal.replace(
-                /\\n/g,
-                "<br>"
-            );
+function showThinking() {
 
-        html += normal;
+    const message =
+        document.createElement("div");
+
+    message.id =
+        "thinking";
+
+    message.className =
+        "message assistant";
+
+    message.innerHTML = `
+        <div class="bubble">
+            🧠 Matia is thinking...
+        </div>
+    `;
+
+    content.appendChild(message);
+
+    main.scrollTop =
+        main.scrollHeight;
+}
+
+
+function hideThinking() {
+
+    const thinking =
+        document.getElementById(
+            "thinking"
+        );
+
+    if (thinking) {
+        thinking.remove();
     }
 }
 
-return html;
-
-}
-
-function addUser(text) {
-
-welcome.style.display = "none";
-
-const div =
-    document.createElement("div");
-
-div.className =
-    "message user";
-
-div.innerHTML = `
-    <div class="bubble">
-        ${escapeHTML(text)}
-    </div>
-`;
-
-messages.appendChild(div);
-
-scrollBottom();
-
-}
-
-function addAssistant(text) {
-
-const div =
-    document.createElement("div");
-
-div.className =
-    "message assistant";
-
-const bubble =
-    document.createElement("div");
-
-bubble.className =
-    "bubble";
-
-bubble.innerHTML =
-    renderAnswer(text);
-
-div.appendChild(bubble);
-
-messages.appendChild(div);
-
-scrollBottom();
-
-}
-
-function loading() {
-
-const div =
-    document.createElement("div");
-
-div.id = "loading";
-
-div.className =
-    "message assistant";
-
-div.innerHTML = `
-    <div class="bubble">
-        🧠 Matia is thinking...
-    </div>
-`;
-
-messages.appendChild(div);
-
-scrollBottom();
-
-}
-
-function removeLoading() {
-
-const item =
-    document.getElementById("loading");
-
-if (item) {
-    item.remove();
-}
-
-}
-
-function scrollBottom() {
-
-chat.scrollTop =
-    chat.scrollHeight;
-
-}
 
 async function sendMessage(text) {
 
-text = text.trim();
+    text = text.trim();
 
-if (!text || send.disabled) {
-    return;
-}
-
-addUser(text);
-
-input.value = "";
-
-send.disabled = true;
-
-status.textContent =
-    "Thinking...";
-
-loading();
-
-try {
-
-    const response =
-        await fetch("/chat", {
-
-            method: "POST",
-
-            headers: {
-                "Content-Type":
-                    "application/json"
-            },
-
-            body: JSON.stringify({
-                message: text,
-                conversation_id:
-                    conversationId
-            })
-        });
-
-    const data =
-        await response.json();
-
-    removeLoading();
-
-    if (!response.ok ||
-        data.error) {
-
-        addAssistant(
-            "❌ " +
-            (data.error ||
-             "Something went wrong.")
-        );
-
-    } else {
-
-        addAssistant(
-            data.answer
-        );
+    if (!text || send.disabled) {
+        return;
     }
 
-} catch (error) {
+    addMessage("user", text);
 
-    removeLoading();
+    input.value = "";
 
-    addAssistant(
-        "❌ Connection error."
-    );
-
-} finally {
-
-    send.disabled = false;
+    send.disabled = true;
 
     status.textContent =
-        "AI Ready";
+        "Thinking...";
 
-    input.focus();
+    showThinking();
+
+    try {
+
+        const response =
+            await fetch(
+                "/chat",
+                {
+                    method: "POST",
+
+                    headers: {
+                        "Content-Type":
+                            "application/json"
+                    },
+
+                    body: JSON.stringify({
+                        message: text,
+                        conversation_id:
+                            conversationId
+                    })
+                }
+            );
+
+        const data =
+            await response.json();
+
+        hideThinking();
+
+        if (!response.ok) {
+
+            addMessage(
+                "assistant",
+                "❌ " +
+                (
+                    data.error ||
+                    "Server error."
+                )
+            );
+
+        } else {
+
+            addMessage(
+                "assistant",
+                data.answer ||
+                "No answer received."
+            );
+        }
+
+    } catch (error) {
+
+        hideThinking();
+
+        addMessage(
+            "assistant",
+            "❌ Connection error. Check Render logs."
+        );
+
+    } finally {
+
+        send.disabled = false;
+
+        status.textContent =
+            "Ready";
+
+        input.focus();
+    }
 }
 
+
+function quickAsk(text) {
+    sendMessage(text);
 }
 
-function quick(text) {
-
-input.value = text;
-
-sendMessage(text);
-
-}
 
 async function copyCode(button) {
 
-const code =
-    button
-        .closest(".codeBox")
-        .querySelector("code")
-        .innerText;
+    const box =
+        button.closest(".codebox");
 
-try {
+    const code =
+        box.querySelector("code")
+           .innerText;
 
-    await navigator.clipboard
-        .writeText(code);
+    try {
 
-    const old =
-        button.innerText;
+        await navigator.clipboard
+            .writeText(code);
 
-    button.innerText =
-        "✓ Copied";
+        button.innerText =
+            "✓ Copied";
 
-    setTimeout(() => {
+        setTimeout(
+            function() {
+                button.innerText =
+                    "📋 Copy";
+            },
+            1200
+        );
 
-        button.innerText = old;
+    } catch (error) {
 
-    }, 1200);
-
-} catch {
-
-    button.innerText =
-        "Copy failed";
+        button.innerText =
+            "Copy failed";
+    }
 }
 
-}
 
 document
-.getElementById("form")
-.addEventListener(
-"submit",
-function(event) {
+    .getElementById("form")
+    .addEventListener(
+        "submit",
+        function(event) {
 
-        event.preventDefault();
+            event.preventDefault();
 
-        sendMessage(input.value);
-    }
-);
+            sendMessage(
+                input.value
+            );
+        }
+    );
+
 
 input.addEventListener(
-"keydown",
-function(event) {
+    "keydown",
+    function(event) {
 
-    if (
-        event.key === "Enter" &&
-        !event.shiftKey
-    ) {
+        if (
+            event.key === "Enter" &&
+            !event.shiftKey
+        ) {
 
-        event.preventDefault();
+            event.preventDefault();
 
-        sendMessage(input.value);
+            sendMessage(
+                input.value
+            );
+        }
     }
-}
-
 );
 
-</script></body>
+
+input.addEventListener(
+    "input",
+    function() {
+
+        this.style.height =
+            "auto";
+
+        this.style.height =
+            Math.min(
+                this.scrollHeight,
+                180
+            ) + "px";
+    }
+);
+
+</script>
+
+</body>
 </html>
-"""============================================================
+"""
 
-ROUTES
-
-============================================================
 
 @app.route("/")
 def home():
-return render_template_string(HTML)
+    return render_template_string(HTML)
+
 
 @app.route("/health")
 def health():
+    return jsonify({
+        "status": "online",
+        "name": "Matia AI",
+        "model": MODEL,
+        "api_configured": bool(GROQ_API_KEY),
+        "expert_count": len(EXPERTS)
+    })
 
-return jsonify({
-    "status": "online",
-    "name": "Matia AI",
-    "model": MODEL,
-    "api_connected": client is not None,
-    "experts": len(EXPERTS)
-})
 
 @app.route("/chat", methods=["POST"])
 def chat():
 
-try:
+    try:
 
-    data =
-        request.get_json(silent=True) or {}
+        data = request.get_json(silent=True) or {}
 
-    message =
-        str(data.get("message", "")).strip()
+        message = str(
+            data.get("message", "")
+        ).strip()
 
-    conversation_id =
-        str(
+        conversation_id = str(
             data.get(
                 "conversation_id",
-                "default"
+                uuid.uuid4()
             )
         )
 
-    if not message:
-        return jsonify({
-            "error": "Write a message first."
-        }), 400
+        if not message:
+            return jsonify({
+                "error": "Write a message first."
+            }), 400
 
-    if len(message) > MAX_MESSAGE_LENGTH:
-        return jsonify({
-            "error": "Message is too long."
-        }), 400
+        if len(message) > MAX_MESSAGE_LENGTH:
+            return jsonify({
+                "error": "Message is too long."
+            }), 400
 
-    add_history(
-        conversation_id,
-        "user",
-        message
-    )
-
-    answer, experts, language, code_mode = \
-        ask_ai(
+        answer, experts, language, code_mode = ask_ai(
             conversation_id,
             message
         )
 
-    add_history(
-        conversation_id,
-        "assistant",
-        answer
+        add_history(
+            conversation_id,
+            "user",
+            message
+        )
+
+        add_history(
+            conversation_id,
+            "assistant",
+            answer
+        )
+
+        return jsonify({
+            "answer": answer,
+            "experts": experts,
+            "language": language,
+            "code_mode": code_mode,
+            "conversation_id": conversation_id
+        })
+
+    except Exception as error:
+
+        print(
+            "MATIA ERROR:",
+            repr(error)
+        )
+
+        return jsonify({
+            "error": str(error)
+        }), 500
+
+
+if __name__ == "__main__":
+
+    port = int(
+        os.getenv(
+            "PORT",
+            "5000"
+        )
     )
 
-    return jsonify({
-        "answer": answer,
-        "experts": experts,
-        "language": language,
-        "code_mode": code_mode,
-        "conversation_id": conversation_id
-    })
-
-except Exception as error:
-
+    print("=" * 60)
+    print("MATIA AI")
+    print("=" * 60)
+    print("Model:", MODEL)
+    print("Experts:", len(EXPERTS))
     print(
-        "MATIA ERROR:",
-        repr(error)
+        "Groq:",
+        "CONNECTED"
+        if client
+        else "MISSING API KEY"
     )
+    print("=" * 60)
 
-    return jsonify({
-        "error": str(error)
-    }), 500
-
-============================================================
-
-RENDER START
-
-============================================================
-
-if name == "main":
-
-port = int(
-    os.environ.get(
-        "PORT",
-        5000
+    app.run(
+        host="0.0.0.0",
+        port=port,
+        debug=False
     )
-)
-
-print("=" * 60)
-print("MATIA AI")
-print("=" * 60)
-print("Model:", MODEL)
-print("Experts:", len(EXPERTS))
-print(
-    "Groq:",
-    "CONNECTED"
-    if client
-    else "NOT CONNECTED"
-)
-print("Port:", port)
-print("=" * 60)
-
-app.run(
-    host="0.0.0.0",
-    port=port,
-    debug=False
-)
